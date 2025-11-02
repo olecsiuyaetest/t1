@@ -22,7 +22,16 @@ builder.Services.AddScoped<CryptoTgShop.Services.Interfaces.IImageStorage, Crypt
 // EF Core
 builder.Services.AddDbContext<CryptoTgShop.Data.AppDbContext>(options =>
 {
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres"));
+    var baseConnectionString = builder.Configuration.GetConnectionString("Postgres") ?? string.Empty;
+    
+    // Append SSL parameters if base connection string is provided
+    string fullConnectionString = baseConnectionString;
+    if (!string.IsNullOrWhiteSpace(baseConnectionString))
+    {
+        fullConnectionString = $"{baseConnectionString}?sslmode=require&channel_binding=require";
+    }
+    
+    options.UseNpgsql(fullConnectionString);
 });
 
 var app = builder.Build();
