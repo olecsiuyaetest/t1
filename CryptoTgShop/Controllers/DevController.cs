@@ -84,8 +84,7 @@ public sealed class DevController : ControllerBase
 	public async Task<IActionResult> EmulateCallback(
 		[FromQuery] long chatId,
 		[FromQuery] string data,
-		[FromQuery] long? messageId = null,
-		CancellationToken cancellationToken)
+		[FromQuery] long? messageId = null)
 	{
 		var callbackMessage = new TgMessage
 		{
@@ -105,44 +104,44 @@ public sealed class DevController : ControllerBase
 			}
 		};
 
-		await _messageHandler.HandleUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+		await _messageHandler.HandleUpdateAsync(update, CancellationToken.None).ConfigureAwait(false);
 		return Ok(new { message = "Callback processed", update });
 	}
 
-	/// <summary>
-	/// Emulate a message with photo from Telegram
-	/// </summary>
-	[HttpPost("emulate/photo")]
-	public async Task<IActionResult> EmulatePhoto(
-		[FromQuery] long chatId,
-		[FromQuery] string fileId,
-		[FromQuery] int width = 800,
-		[FromQuery] int height = 600,
-		CancellationToken cancellationToken)
-	{
-		var update = new Update
-		{
-			UpdateId = Interlocked.Increment(ref _updateIdCounter),
-			Message = new TgMessage
-			{
-				MessageId = Interlocked.Increment(ref _messageIdCounter),
-				Chat = new TgChat { Id = chatId },
-				Text = null,
-				Photo = new[]
-				{
-					new PhotoSize
-					{
-						FileId = fileId,
-						Width = width,
-						Height = height
-					}
-				}
-			}
-		};
+	///// <summary>
+	///// Emulate a message with photo from Telegram
+	///// </summary>
+	//[HttpPost("emulate/photo")]
+	//public async Task<IActionResult> EmulatePhoto(
+	//	[FromQuery] long chatId,
+	//	[FromQuery] string fileId,
+	//	[FromQuery] int width = 800,
+	//	[FromQuery] int height = 600,
+	//	CancellationToken cancellationToken)
+	//{
+	//	var update = new Update
+	//	{
+	//		UpdateId = Interlocked.Increment(ref _updateIdCounter),
+	//		Message = new TgMessage
+	//		{
+	//			MessageId = Interlocked.Increment(ref _messageIdCounter),
+	//			Chat = new TgChat { Id = chatId },
+	//			Text = null,
+	//			Photo = new[]
+	//			{
+	//				new PhotoSize
+	//				{
+	//					FileId = fileId,
+	//					Width = width,
+	//					Height = height
+	//				}
+	//			}
+	//		}
+	//	};
 
-		await _messageHandler.HandleUpdateAsync(update, cancellationToken).ConfigureAwait(false);
-		return Ok(new { message = "Photo message processed", update });
-	}
+	//	await _messageHandler.HandleUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+	//	return Ok(new { message = "Photo message processed", update });
+	//}
 
 	/// <summary>
 	/// Emulate a full Update object (most flexible)
@@ -169,10 +168,9 @@ public sealed class DevController : ControllerBase
 	/// </summary>
 	[HttpPost("test/start")]
 	public async Task<IActionResult> TestStart(
-		[FromQuery] long chatId = 123456,
-		CancellationToken cancellationToken)
+		[FromQuery] long chatId = 123456)
 	{
-		return await EmulateMessage(chatId, "/start", cancellationToken).ConfigureAwait(false);
+		return await EmulateMessage(chatId, "/start", CancellationToken.None).ConfigureAwait(false);
 	}
 
 	/// <summary>
@@ -180,11 +178,10 @@ public sealed class DevController : ControllerBase
 	/// </summary>
 	[HttpPost("test/admin")]
 	public async Task<IActionResult> TestAdmin(
-		[FromQuery] long chatId = 123456,
-		CancellationToken cancellationToken)
+		[FromQuery] long chatId = 123456)
 	{
 		var adminKey = _admin.Value.SecretKey;
-		return await EmulateMessage(chatId, adminKey, cancellationToken).ConfigureAwait(false);
+		return await EmulateMessage(chatId, adminKey, CancellationToken.None).ConfigureAwait(false);
 	}
 
 	/// <summary>
@@ -193,10 +190,9 @@ public sealed class DevController : ControllerBase
 	[HttpPost("test/category")]
 	public async Task<IActionResult> TestCategory(
 		[FromQuery] long chatId = 123456,
-		[FromQuery] string category = "choco",
-		CancellationToken cancellationToken)
+		[FromQuery] string category = "choco")
 	{
-		return await EmulateCallback(chatId, $"cat:{category}", cancellationToken: cancellationToken).ConfigureAwait(false);
+		return await EmulateCallback(chatId, $"cat:{category}").ConfigureAwait(false);
 	}
 }
 
