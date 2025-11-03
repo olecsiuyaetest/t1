@@ -95,37 +95,48 @@ public sealed class NowPaymentsApiClient : INowPaymentsApiClient
 			throw new InvalidOperationException($"{fieldName} has unexpected type: {element.ValueKind}");
 		}
 
-		// Invoice response has invoice_id instead of payment_id, and invoice_url for the payment URL
-		var paymentId = root.TryGetProperty("payment_id", out var paymentIdProp) 
-			? paymentIdProp.GetString() 
-			: root.TryGetProperty("invoice_id", out var invoiceIdProp) 
-				? invoiceIdProp.GetString() 
-				: throw new InvalidOperationException("payment_id/invoice_id is missing");
+		// Invoice response uses "id" field for invoice ID
+		var paymentId = root.TryGetProperty("id", out var idProp)
+			? GetValueAsString(idProp, "id")
+			: root.TryGetProperty("payment_id", out var paymentIdProp) 
+				? GetValueAsString(paymentIdProp, "payment_id")
+				: root.TryGetProperty("invoice_id", out var invoiceIdProp) 
+					? GetValueAsString(invoiceIdProp, "invoice_id")
+					: throw new InvalidOperationException("id/payment_id/invoice_id is missing");
 
+		// Invoice URL is directly available in the response
 		var invoiceUrl = root.TryGetProperty("invoice_url", out var invoiceUrlProp) 
 			? invoiceUrlProp.GetString() 
 			: root.TryGetProperty("payment_url", out var paymentUrlProp) 
 				? paymentUrlProp.GetString() 
 				: throw new InvalidOperationException("invoice_url/payment_url is missing");
 
+		// Helper to parse price_amount (can be string or number)
+		decimal ParsePriceAmount(JsonElement element, decimal fallback)
+		{
+			if (element.ValueKind == JsonValueKind.String)
+			{
+				return decimal.TryParse(element.GetString(), out var result) ? result : fallback;
+			}
+			if (element.ValueKind == JsonValueKind.Number)
+			{
+				return element.GetDecimal();
+			}
+			return fallback;
+		}
+
 		var result = new CreatePaymentResponse
 		{
-			PaymentId = paymentId ?? throw new InvalidOperationException("payment_id/invoice_id is null"),
-			PaymentStatus = root.TryGetProperty("payment_status", out var statusProp) 
-				? statusProp.GetString() ?? "waiting" 
-				: "waiting",
-			PayAddress = root.TryGetProperty("pay_address", out var addressProp) 
-				? addressProp.GetString() ?? string.Empty 
-				: string.Empty,
+			PaymentId = paymentId,
+			PaymentStatus = "waiting", // Invoice is just created, status is waiting
+			PayAddress = string.Empty, // Not available in invoice creation response
 			PriceAmount = root.TryGetProperty("price_amount", out var priceAmountProp) 
-				? priceAmountProp.GetDecimal() 
+				? ParsePriceAmount(priceAmountProp, priceAmount)
 				: priceAmount,
 			PriceCurrency = root.TryGetProperty("price_currency", out var priceCurrencyProp) 
 				? priceCurrencyProp.GetString() ?? priceCurrency 
 				: priceCurrency,
-			PayAmount = root.TryGetProperty("pay_amount", out var payAmountProp) 
-				? GetValueAsString(payAmountProp, "pay_amount") 
-				: string.Empty,
+			PayAmount = string.Empty, // Not available until payment is selected
 			PayCurrency = root.TryGetProperty("pay_currency", out var payCurrencyProp) 
 				? payCurrencyProp.GetString() ?? string.Empty 
 				: string.Empty,
@@ -136,13 +147,7 @@ public sealed class NowPaymentsApiClient : INowPaymentsApiClient
 				? orderDescProp.GetString() ?? orderDescription 
 				: orderDescription,
 			PaymentUrl = invoiceUrl ?? throw new InvalidOperationException("invoice_url/payment_url is null"),
-			ExpirationAt = root.TryGetProperty("expiration_at", out var exp) 
-				? exp.GetInt64() 
-				: root.TryGetProperty("expiration_estimate_date", out var expEst) 
-					? (expEst.ValueKind == JsonValueKind.String && DateTime.TryParse(expEst.GetString(), out var dateTime))
-						? new DateTimeOffset(dateTime).ToUnixTimeSeconds()
-						: null
-					: null
+			ExpirationAt = null // Not provided in invoice creation response
 		};
 
 		_logger.LogInformation(
