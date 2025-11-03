@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -113,6 +114,13 @@ builder.Services.AddDbContext<CryptoTgShop.Data.AppDbContext>(options =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
+
+// Apply pending EF Core migrations on startup
+using (var scope = app.Services.CreateScope())
+{
+	var dbContext = scope.ServiceProvider.GetRequiredService<CryptoTgShop.Data.AppDbContext>();
+	dbContext.Database.Migrate();
+}
 
 app.UseHttpsRedirection();
 
