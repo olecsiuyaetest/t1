@@ -35,6 +35,9 @@ public sealed class BotTextOptions
 
 	[Required]
 	public string NoItemsForCategory { get; init; } = string.Empty; // expects {category}
+
+	[Required]
+	public string CategoryValidationMessage { get; init; } = string.Empty; // expects {category}
 }
 
 

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using CryptoTgShop.Data;
 using CryptoTgShop.Data.Entities;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace CryptoTgShop.Services;
 
@@ -16,6 +17,7 @@ public sealed class UserMessageHandler : IUserMessageHandler
     private readonly IAdminWizardStore _wizard;
     private readonly IImageStorage _imageStorage;
     private readonly AppDbContext _db;
+    private readonly IServiceScopeFactory _scopeFactory;
 	private readonly ILogger<UserMessageHandler> _logger;
 
 	public UserMessageHandler(
@@ -23,8 +25,9 @@ public sealed class UserMessageHandler : IUserMessageHandler
 		IOptions<BotTextOptions> texts, 
 		IOptions<AdminOptions> admin, 
 		IAdminWizardStore wizard, 
-		IImageStorage imageStorage, 
-		AppDbContext db,
+        IImageStorage imageStorage, 
+        AppDbContext db,
+        IServiceScopeFactory scopeFactory,
 		ILogger<UserMessageHandler> logger)
 	{
 		_api = api;
@@ -33,6 +36,7 @@ public sealed class UserMessageHandler : IUserMessageHandler
         _wizard = wizard;
         _imageStorage = imageStorage;
         _db = db;
+        _scopeFactory = scopeFactory;
 		_logger = logger;
 	}
 
@@ -262,16 +266,15 @@ public sealed class UserMessageHandler : IUserMessageHandler
 		}
 
 		_logger.LogInformation("Checking database for available items. Category: {Category}", category);
-		// Check availability before payment
+		// Validate availability before proceeding with payment
 		var anyAvailable = _db.DataRecords.Any(r => !r.IsUsed && r.Type == category);
 		_logger.LogInformation("Available items for category '{Category}': {AnyAvailable}", category, anyAvailable);
 		
 		if (!anyAvailable)
 		{
-			var noItemsText = _texts.NoItemsForCategory.Replace("{category}", category, StringComparison.OrdinalIgnoreCase);
-			_logger.LogInformation("No items available, sending message: {Message}", noItemsText);
-			await _api.AnswerCallbackQueryAsync(callback.Id, null, false, cancellationToken).ConfigureAwait(false);
-			await _api.SendMessageAsync(chatId.Value, noItemsText, null, cancellationToken).ConfigureAwait(false);
+			var validationMessage = _texts.CategoryValidationMessage.Replace("{category}", category, StringComparison.OrdinalIgnoreCase);
+			_logger.LogInformation("No items available, showing validation message: {Message}", validationMessage);
+			await _api.AnswerCallbackQueryAsync(callback.Id, validationMessage, false, cancellationToken).ConfigureAwait(false);
 			_logger.LogInformation("========== HANDLE CALLBACK END ==========");
 			return;
 		}
@@ -282,7 +285,7 @@ public sealed class UserMessageHandler : IUserMessageHandler
 		await _api.AnswerCallbackQueryAsync(callback.Id, null, false, cancellationToken).ConfigureAwait(false);
 		await _api.SendMessageAsync(chatId.Value, paymentLink, null, cancellationToken).ConfigureAwait(false);
 
-		_logger.LogInformation("Starting background task to send item after 10 seconds. Category: {Category}, ChatId: {ChatId}", category, chatId.Value);
+        _logger.LogInformation("Starting background task to send item after 10 seconds. Category: {Category}, ChatId: {ChatId}", category, chatId.Value);
 		_ = Task.Run(async () =>
 		{
 			try
@@ -291,13 +294,15 @@ public sealed class UserMessageHandler : IUserMessageHandler
 				await Task.Delay(TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(false);
 				_logger.LogInformation("[Background] Delay completed, selecting item for category: {Category}", category);
 
-				// Select a random available item for the category
-				DataRecord? record;
-				await using (var scope = new Microsoft.Extensions.DependencyInjection.ServiceCollection().BuildServiceProvider()) { }
-				record = _db.DataRecords
-					.Where(r => !r.IsUsed && r.Type == category)
-					.OrderBy(r => Guid.NewGuid())
-					.FirstOrDefault();
+                // Create a new DI scope for background DB operations
+                using var scope = _scopeFactory.CreateScope();
+                var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+                // Select a random available item for the category
+                var record = scopedDb.DataRecords
+                    .Where(r => !r.IsUsed && r.Type == category)
+                    .OrderBy(r => Guid.NewGuid())
+                    .FirstOrDefault();
 
 				if (record is null)
 				{
@@ -314,8 +319,8 @@ public sealed class UserMessageHandler : IUserMessageHandler
 				await _api.SendPhotoAsync(chatId.Value, record.ImageUrl, record.Message, null, CancellationToken.None).ConfigureAwait(false);
 				
 				_logger.LogInformation("[Background] Marking item as used. Record ID: {Id}", record.Id);
-				record.IsUsed = true;
-				await _db.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
+                record.IsUsed = true;
+                await scopedDb.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
 				_logger.LogInformation("[Background] Item marked as used and saved to database");
 			}
 			catch (Exception ex)
