@@ -6,6 +6,7 @@ using CryptoTgShop.Data;
 using CryptoTgShop.Data.Entities;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 
 namespace CryptoTgShop.Services;
 
@@ -18,6 +19,8 @@ public sealed class UserMessageHandler : IUserMessageHandler
     private readonly IImageStorage _imageStorage;
     private readonly AppDbContext _db;
     private readonly IServiceScopeFactory _scopeFactory;
+	private readonly INowPaymentsApiClient _nowPaymentsApi;
+	private readonly NowPaymentsOptions _nowPaymentsOptions;
 	private readonly ILogger<UserMessageHandler> _logger;
 
 	public UserMessageHandler(
@@ -28,6 +31,8 @@ public sealed class UserMessageHandler : IUserMessageHandler
         IImageStorage imageStorage, 
         AppDbContext db,
         IServiceScopeFactory scopeFactory,
+		INowPaymentsApiClient nowPaymentsApi,
+		IOptions<NowPaymentsOptions> nowPaymentsOptions,
 		ILogger<UserMessageHandler> logger)
 	{
 		_api = api;
@@ -37,6 +42,8 @@ public sealed class UserMessageHandler : IUserMessageHandler
         _imageStorage = imageStorage;
         _db = db;
         _scopeFactory = scopeFactory;
+		_nowPaymentsApi = nowPaymentsApi;
+		_nowPaymentsOptions = nowPaymentsOptions.Value;
 		_logger = logger;
 	}
 
@@ -267,7 +274,7 @@ public sealed class UserMessageHandler : IUserMessageHandler
 
 		_logger.LogInformation("Checking database for available items. Category: {Category}", category);
 		// Validate availability before proceeding with payment
-		var anyAvailable = _db.DataRecords.Any(r => !r.IsUsed && r.Type == category);
+		var anyAvailable = await _db.DataRecords.AnyAsync(r => !r.IsUsed && r.Type == category, cancellationToken).ConfigureAwait(false);
 		_logger.LogInformation("Available items for category '{Category}': {AnyAvailable}", category, anyAvailable);
 		
 		if (!anyAvailable)
@@ -279,57 +286,64 @@ public sealed class UserMessageHandler : IUserMessageHandler
 			return;
 		}
 
-		var paymentLink = _texts.PaymentLinkTemplate.Replace("{category}", category, StringComparison.OrdinalIgnoreCase);
-		_logger.LogInformation("Payment link generated: {PaymentLink}", paymentLink);
-		_logger.LogInformation("Answering callback query and sending payment link to ChatId: {ChatId}", chatId.Value);
-		await _api.AnswerCallbackQueryAsync(callback.Id, null, false, cancellationToken).ConfigureAwait(false);
-		await _api.SendMessageAsync(chatId.Value, paymentLink, null, cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation("Starting background task to send item after 10 seconds. Category: {Category}, ChatId: {ChatId}", category, chatId.Value);
-		_ = Task.Run(async () =>
+		// Create payment intent with NowPayments
+		try
 		{
-			try
+			_logger.LogInformation("Creating payment intent. Category: {Category}, ChatId: {ChatId}", category, chatId.Value);
+			
+			// Generate unique order ID
+			var orderId = $"ORDER-{chatId.Value}-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
+			var orderDescription = $"Purchase: {category}";
+
+			_logger.LogInformation("Creating payment via NowPayments API. OrderId: {OrderId}", orderId);
+			var paymentResponse = await _nowPaymentsApi.CreatePaymentAsync(
+				_nowPaymentsOptions.PriceAmount,
+				_nowPaymentsOptions.PriceCurrency,
+				orderId,
+				orderDescription,
+				cancellationToken).ConfigureAwait(false);
+
+			_logger.LogInformation(
+				"Payment created: PaymentId={PaymentId}, PaymentUrl={PaymentUrl}, Status={Status}",
+				paymentResponse.PaymentId, paymentResponse.PaymentUrl, paymentResponse.PaymentStatus);
+
+			// Save payment to database
+			var payment = new Payment
 			{
-				_logger.LogInformation("[Background] Waiting 10 seconds before sending item...");
-				await Task.Delay(TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(false);
-				_logger.LogInformation("[Background] Delay completed, selecting item for category: {Category}", category);
+				TelegramChatId = chatId.Value,
+				Category = category,
+				PaymentId = paymentResponse.PaymentId,
+				PaymentUrl = paymentResponse.PaymentUrl,
+				PriceAmount = paymentResponse.PriceAmount,
+				PriceCurrency = paymentResponse.PriceCurrency,
+				PayCurrency = paymentResponse.PayCurrency,
+				OrderId = paymentResponse.OrderId,
+				Status = PaymentStatus.Pending,
+				CreatedAtUtc = DateTime.UtcNow
+			};
 
-                // Create a new DI scope for background DB operations
-                using var scope = _scopeFactory.CreateScope();
-                var scopedDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+			_db.Payments.Add(payment);
+			await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
-                // Select a random available item for the category
-                var record = scopedDb.DataRecords
-                    .Where(r => !r.IsUsed && r.Type == category)
-                    .OrderBy(r => Guid.NewGuid())
-                    .FirstOrDefault();
+			_logger.LogInformation("Payment saved to database. PaymentId: {PaymentId}", payment.PaymentId);
 
-				if (record is null)
-				{
-					_logger.LogWarning("[Background] No available items found for category: {Category}", category);
-					var noItems = _texts.NoItemsForCategory.Replace("{category}", category, StringComparison.OrdinalIgnoreCase);
-					await _api.SendMessageAsync(chatId.Value, noItems, null, CancellationToken.None).ConfigureAwait(false);
-					_logger.LogInformation("[Background] Sent 'no items' message to ChatId: {ChatId}", chatId.Value);
-					return;
-				}
+			// Send payment link to user
+			var paymentMessage = $"Please complete your payment:\n{paymentResponse.PaymentUrl}\n\nAfter payment is confirmed, you will receive your item automatically.";
+			await _api.AnswerCallbackQueryAsync(callback.Id, null, false, cancellationToken).ConfigureAwait(false);
+			await _api.SendMessageAsync(chatId.Value, paymentMessage, null, cancellationToken).ConfigureAwait(false);
 
-				_logger.LogInformation("[Background] Selected item: Type={Type}, Message={Message}, ImageUrl={ImageUrl}, IsUsed={IsUsed}", 
-					record.Type, record.Message, record.ImageUrl, record.IsUsed);
-				_logger.LogInformation("[Background] Sending photo to ChatId: {ChatId}", chatId.Value);
-				await _api.SendPhotoAsync(chatId.Value, record.ImageUrl, record.Message, null, CancellationToken.None).ConfigureAwait(false);
-				
-				_logger.LogInformation("[Background] Marking item as used. Record ID: {Id}", record.Id);
-                record.IsUsed = true;
-                await scopedDb.SaveChangesAsync(CancellationToken.None).ConfigureAwait(false);
-				_logger.LogInformation("[Background] Item marked as used and saved to database");
-			}
-			catch (Exception ex)
-			{
-				_logger.LogError(ex, "[Background] Exception in background task: {ExceptionType}: {ExceptionMessage}\nStackTrace: {StackTrace}", 
-					ex.GetType().Name, ex.Message, ex.StackTrace);
-				// ignore background errors
-			}
-		});
+			_logger.LogInformation("Payment link sent to user. ChatId: {ChatId}", chatId.Value);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Failed to create payment intent: {ExceptionType}: {ExceptionMessage}", 
+				ex.GetType().Name, ex.Message);
+			
+			var errorMessage = "Failed to create payment. Please try again later.";
+			await _api.AnswerCallbackQueryAsync(callback.Id, errorMessage, false, cancellationToken).ConfigureAwait(false);
+			await _api.SendMessageAsync(chatId.Value, errorMessage, null, cancellationToken).ConfigureAwait(false);
+		}
+
 		_logger.LogInformation("========== HANDLE CALLBACK END ==========");
 	}
 }

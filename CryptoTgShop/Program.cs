@@ -13,12 +13,16 @@ builder.Services.Configure<CryptoTgShop.Options.TelegramOptions>(builder.Configu
 builder.Services.Configure<CryptoTgShop.Options.BotTextOptions>(builder.Configuration.GetSection("BotText"));
 builder.Services.Configure<CryptoTgShop.Options.AdminOptions>(builder.Configuration.GetSection("Admin"));
 builder.Services.Configure<CryptoTgShop.Options.CloudinaryOptions>(builder.Configuration.GetSection("Cloudinary"));
+builder.Services.Configure<CryptoTgShop.Options.NowPaymentsOptions>(builder.Configuration.GetSection("NowPayments"));
 
 // Telegram services
 builder.Services.AddHttpClient<CryptoTgShop.Services.Interfaces.ITelegramApiClient, CryptoTgShop.Services.TelegramApiClient>();
 builder.Services.AddScoped<CryptoTgShop.Services.Interfaces.IUserMessageHandler, CryptoTgShop.Services.UserMessageHandler>();
 builder.Services.AddSingleton<CryptoTgShop.Services.IAdminWizardStore, CryptoTgShop.Services.AdminWizardStore>();
 builder.Services.AddScoped<CryptoTgShop.Services.Interfaces.IImageStorage, CryptoTgShop.Services.CloudinaryImageStorage>();
+
+// NowPayments services
+builder.Services.AddScoped<CryptoTgShop.Services.Interfaces.INowPaymentsApiClient, CryptoTgShop.Services.NowPaymentsApiClient>();
 
 // EF Core
 builder.Services.AddDbContext<CryptoTgShop.Data.AppDbContext>(options =>
@@ -116,11 +120,11 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 
 // Apply pending EF Core migrations on startup
-using (var scope = app.Services.CreateScope())
-{
-	var dbContext = scope.ServiceProvider.GetRequiredService<CryptoTgShop.Data.AppDbContext>();
-	dbContext.Database.Migrate();
-}
+//using (var scope = app.Services.CreateScope())
+//{
+//	var dbContext = scope.ServiceProvider.GetRequiredService<CryptoTgShop.Data.AppDbContext>();
+//	dbContext.Database.Migrate();
+//}
 
 app.UseHttpsRedirection();
 
