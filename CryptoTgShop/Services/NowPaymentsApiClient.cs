@@ -47,7 +47,7 @@ public sealed class NowPaymentsApiClient : INowPaymentsApiClient
 			"Creating invoice: Amount={Amount}, Currency={Currency}, OrderId={OrderId}",
 			priceAmount, priceCurrency, orderId);
 
-		var request = new RestRequest($"{_apiPath}/invoice", Method.Post);
+		var request = new RestRequest($"https://api-sandbox.nowpayments.io/v1/invoice", Method.Post);
 		request.AddHeader("x-api-key", _options.ApiKey);
 		request.AddHeader("Content-Type", "application/json");
 
