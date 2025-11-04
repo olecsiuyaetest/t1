@@ -99,7 +99,7 @@ public sealed class PaymentController : ControllerBase
 		}
 
 		// Convert payment ID to string for database lookup (stored as string)
-		var paymentIdString = payload.PaymentId.ToString();
+		var orderIdString = payload.OrderId.ToString();
 
 		_logger.LogInformation(
 			"Processing webhook: PaymentId={PaymentId}, InvoiceId={InvoiceId}, Status={Status}, OrderId={OrderId}",
@@ -107,7 +107,7 @@ public sealed class PaymentController : ControllerBase
 
 		// Find payment in database by payment_id (stored as string)
 		var payment = await _db.Payments
-			.FirstOrDefaultAsync(p => p.PaymentId == paymentIdString, cancellationToken).ConfigureAwait(false);
+			.FirstOrDefaultAsync(p => p.OrderId == orderIdString, cancellationToken).ConfigureAwait(false);
 
 		if (payment == null)
 		{

@@ -1,6 +1,8 @@
+using CryptoTgShop.Models.NowPayments;
 using CryptoTgShop.Options;
 using CryptoTgShop.Services.Interfaces;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 using RestSharp;
 using System.Text.Json;
 
@@ -74,75 +76,26 @@ public sealed class NowPaymentsApiClient : INowPaymentsApiClient
 
 		_logger.LogInformation("NowPayments invoice response: {Response}", response.Content);
 
-		var jsonDoc = JsonDocument.Parse(response.Content ?? "{}");
-		var root = jsonDoc.RootElement;
-
-		// Helper to get value as string (handles both number and string types)
-		string GetValueAsString(JsonElement element, string fieldName)
+		if (string.IsNullOrEmpty(response.Content))
 		{
-			if (element.ValueKind == JsonValueKind.String)
-			{
-				return element.GetString() ?? throw new InvalidOperationException($"{fieldName} is null");
-			}
-			if (element.ValueKind == JsonValueKind.Number)
-			{
-				return element.GetDecimal().ToString("G", System.Globalization.CultureInfo.InvariantCulture);
-			}
-			if (element.ValueKind == JsonValueKind.Null)
-			{
-				return string.Empty;
-			}
-			throw new InvalidOperationException($"{fieldName} has unexpected type: {element.ValueKind}");
+			throw new InvalidOperationException("NowPayments API returned empty response");
 		}
 
-		// Invoice response uses "id" field for invoice ID
-		var paymentId = root.TryGetProperty("invoice_id", out var idProp)
-			? GetValueAsString(idProp, "invoice_id") :
-            throw new ArgumentNullException("No invoice id");
-
-		// Invoice URL is directly available in the response
-		var invoiceUrl = root.TryGetProperty("invoice_url", out var invoiceUrlProp) 
-			? invoiceUrlProp.GetString() 
-			: root.TryGetProperty("payment_url", out var paymentUrlProp) 
-				? paymentUrlProp.GetString() 
-				: throw new InvalidOperationException("invoice_url/payment_url is missing");
-
-		// Helper to parse price_amount (can be string or number)
-		decimal ParsePriceAmount(JsonElement element, decimal fallback)
-		{
-			if (element.ValueKind == JsonValueKind.String)
-			{
-				return decimal.TryParse(element.GetString(), out var result) ? result : fallback;
-			}
-			if (element.ValueKind == JsonValueKind.Number)
-			{
-				return element.GetDecimal();
-			}
-			return fallback;
-		}
+		var invoiceResponse = JsonConvert.DeserializeObject<InvoiceResponse>(response.Content)
+			?? throw new InvalidOperationException("Failed to deserialize invoice response");
 
 		var result = new CreatePaymentResponse
 		{
-			PaymentId = paymentId,
+			PaymentId = invoiceResponse.Id,
 			PaymentStatus = "waiting", // Invoice is just created, status is waiting
 			PayAddress = string.Empty, // Not available in invoice creation response
-			PriceAmount = root.TryGetProperty("price_amount", out var priceAmountProp) 
-				? ParsePriceAmount(priceAmountProp, priceAmount)
-				: priceAmount,
-			PriceCurrency = root.TryGetProperty("price_currency", out var priceCurrencyProp) 
-				? priceCurrencyProp.GetString() ?? priceCurrency 
-				: priceCurrency,
+			PriceAmount = invoiceResponse.PriceAmount > 0 ? invoiceResponse.PriceAmount : priceAmount,
+			PriceCurrency = invoiceResponse.PriceCurrency ?? priceCurrency,
 			PayAmount = string.Empty, // Not available until payment is selected
-			PayCurrency = root.TryGetProperty("pay_currency", out var payCurrencyProp) 
-				? payCurrencyProp.GetString() ?? string.Empty 
-				: string.Empty,
-			OrderId = root.TryGetProperty("order_id", out var orderIdProp) 
-				? orderIdProp.GetString() ?? orderId 
-				: orderId,
-			OrderDescription = root.TryGetProperty("order_description", out var orderDescProp) 
-				? orderDescProp.GetString() ?? orderDescription 
-				: orderDescription,
-			PaymentUrl = invoiceUrl ?? throw new InvalidOperationException("invoice_url/payment_url is null"),
+			PayCurrency = invoiceResponse.PayCurrency ?? string.Empty,
+			OrderId = invoiceResponse.OrderId ?? orderId,
+			OrderDescription = invoiceResponse.OrderDescription ?? orderDescription,
+			PaymentUrl = invoiceResponse.InvoiceUrl,
 			ExpirationAt = null // Not provided in invoice creation response
 		};
 
