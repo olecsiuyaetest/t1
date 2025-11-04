@@ -51,18 +51,25 @@ public sealed class NowPaymentsApiClient : INowPaymentsApiClient
 		request.AddHeader("x-api-key", _options.ApiKey);
 		request.AddHeader("Content-Type", "application/json");
 
-		var body = new
-		{
-			price_amount = priceAmount,
-			price_currency = priceCurrency.ToLowerInvariant(),
-			order_id = orderId,
-			order_description = orderDescription,
-			ipn_callback_url = _options.IpnCallbackUrl,
-			success_url = _options.SuccessUrl ?? "https://nowpayments.io",
-			cancel_url = _options.CancelUrl ?? "https://nowpayments.io"
-		};
+		var body = @"{
+" + "\n" +
+@"  ""price_amount"": " + priceAmount.ToString(System.Globalization.CultureInfo.InvariantCulture) + @",
+" + "\n" +
+@"  ""price_currency"": """ + priceCurrency.ToLowerInvariant() + @""",
+" + "\n" +
+@"  ""order_id"": """ + orderId + @""",
+" + "\n" +
+@"  ""order_description"": """ + orderDescription + @""",
+" + "\n" +
+@"  ""ipn_callback_url"": """ + _options.IpnCallbackUrl + @""",
+" + "\n" +
+@"  ""success_url"": """ + (_options.SuccessUrl ?? "https://nowpayments.io") + @""",
+" + "\n" +
+@"  ""cancel_url"": """ + (_options.CancelUrl ?? "https://nowpayments.io") + @"""
+" + "\n" +
+@"}";
 
-		request.AddJsonBody(body);
+		request.AddStringBody(body, DataFormat.Json);
 
 		var response = await _client.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
 
