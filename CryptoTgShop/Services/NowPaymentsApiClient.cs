@@ -96,13 +96,9 @@ public sealed class NowPaymentsApiClient : INowPaymentsApiClient
 		}
 
 		// Invoice response uses "id" field for invoice ID
-		var paymentId = root.TryGetProperty("id", out var idProp)
-			? GetValueAsString(idProp, "id")
-			: root.TryGetProperty("payment_id", out var paymentIdProp) 
-				? GetValueAsString(paymentIdProp, "payment_id")
-				: root.TryGetProperty("invoice_id", out var invoiceIdProp) 
-					? GetValueAsString(invoiceIdProp, "invoice_id")
-					: throw new InvalidOperationException("id/payment_id/invoice_id is missing");
+		var paymentId = root.TryGetProperty("invoice_id", out var idProp)
+			? GetValueAsString(idProp, "invoice_id") :
+            throw new ArgumentNullException("No invoice id");
 
 		// Invoice URL is directly available in the response
 		var invoiceUrl = root.TryGetProperty("invoice_url", out var invoiceUrlProp) 
